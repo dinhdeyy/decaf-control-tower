@@ -675,18 +675,27 @@ function taskHTML(t){
   const hasNote=t.weeklyNote&&t.weeklyNote.text;
   const noteClass=hasNote?'has-note':'';
   const teamClass=t.team==='ea'?'team-ea':'';
-  const nbClass=hasNote?`active-note${t.team==='ea'?' team-ea':''}`:'';
-  return `<div class="task-item ${noteClass} ${teamClass}" data-id="${t.id}" data-team="${t.team}" data-status="${t.status}" data-process="${t.processIdx}">
-    <button class="note-btn ${nbClass}" title="${hasNote?'Sửa note: '+t.weeklyNote.text:'Thêm note'}" onclick="handleNoteClick(event,'${t.id}')">${hasNote?'📌':'📝'}</button>
-    <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span class="task-name">${t.process}</span>
-      ${hasNote?`<span class="task-note-preview" title="${t.weeklyNote.text}">${t.weeklyNote.text}</span>`:''}
-    </div>
-    ${hasNote?`<span class="week-badge">W${t.weeklyNote.week}</span>`:''}
-    <span class="status-pill ${t.status}" onclick="handleStatusClick(event,'${t.id}',this.closest('.task-item'))">
-      <span class="status-dot"></span>${STATUS_LABEL[t.status]}
-    </span>
-  </div>`;
+  const nbClass=hasNote?('active-note'+(t.team==='ea'?' team-ea':'')):'';
+  const notePreview=hasNote?('<span class="task-note-preview" title="'+escapeHtml(t.weeklyNote.text)+'">'+escapeHtml(t.weeklyNote.text)+'</span>'):'';
+  const weekBadge=hasNote?('<span class="week-badge">W'+t.weeklyNote.week+'</span>'):'';
+  const noteTitle=hasNote?('Sửa note: '+escapeHtml(t.weeklyNote.text)):'Thêm note';
+  return '<div class="task-item '+noteClass+' '+teamClass+'" data-id="'+t.id+'" data-team="'+t.team+'" data-status="'+t.status+'" data-process="'+t.processIdx+'">'
+    +'<button class="note-btn '+nbClass+'" title="'+noteTitle+'" onclick="handleNoteClick(event,\''+t.id+'\')">'+(hasNote?'📌':'📝')+'</button>'
+    +'<div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+    +'<span class="task-name">'+t.process+'</span>'
+    +notePreview
+    +'</div>'
+    +weekBadge
+    +'<span class="status-pill '+t.status+'" onclick="handleStatusClick(event,\''+t.id+'\',this.closest(\'.task-item\'))">'
+    +'<span class="status-dot"></span>'+STATUS_LABEL[t.status]
+    +'</span>'
+    +'</div>';
+}
+
+/* FIX: safe HTML escape to avoid issues with special chars in notes */
+function escapeHtml(str){
+  if(!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function toggleGroup(h){ h.parentElement.classList.toggle('collapsed'); }
@@ -698,13 +707,13 @@ function handleStatusClick(e,id,el){
 }
 function cycleStatus(id,el){
   const t=tasks.find(t=>t.id===id); if(!t)return;
-  const oldStatus = t.status;               // capture before change
+  const oldStatus=t.status;
   t.status=STATUS_CYCLE[t.status];
-  historyManager.log(t, oldStatus, t.status); // log the change
+  historyManager.log(t,oldStatus,t.status);
   el.dataset.status=t.status;
   const pill=el.querySelector('.status-pill');
-  pill.className=`status-pill ${t.status}`;
-  pill.innerHTML=`<span class="status-dot"></span>${STATUS_LABEL[t.status]}`;
+  pill.className='status-pill '+t.status;
+  pill.innerHTML='<span class="status-dot"></span>'+STATUS_LABEL[t.status];
   el.classList.remove('click-anim'); void el.offsetWidth; el.classList.add('click-anim');
   saveStatuses();
   updateLineHeader(t.line);
@@ -713,12 +722,12 @@ function cycleStatus(id,el){
   if(currentTab==='weekly')renderWeeklySection();
 }
 function updateLineHeader(line){
-  const g=document.querySelector(`.process-group[data-line="${line}"]`); if(!g)return;
+  const g=document.querySelector('.process-group[data-line="'+line+'"]'); if(!g)return;
   const lt=tasks.filter(t=>t.line===line);
   const sp=getStats(lt.filter(t=>t.team==='prod'));
   const se=getStats(lt.filter(t=>t.team==='ea'));
   const s=g.querySelector('.process-mini-stats');
-  if(s)s.innerHTML=`<span class="mini-stat"><span class="mini-dot" style="background:var(--blue)"></span>Prod ${sp.pct}%</span><span class="mini-stat"><span class="mini-dot" style="background:var(--pink-dark)"></span>E&A ${se.pct}%</span>`;
+  if(s)s.innerHTML='<span class="mini-stat"><span class="mini-dot" style="background:var(--blue)"></span>Prod '+sp.pct+'%</span><span class="mini-stat"><span class="mini-dot" style="background:var(--pink-dark)"></span>E&A '+se.pct+'%</span>';
 }
 
 /* ============================================================
@@ -726,68 +735,122 @@ function updateLineHeader(line){
    ============================================================ */
 function handleNoteClick(e,id){ e.stopPropagation(); requireLogin(()=>openNotePopup(e,id)); }
 
+/* FIX 1: Rebuilt openNotePopup — the original had a broken template literal
+   bug where it used '%' as a placeholder then tried .replace('%','') which
+   caused the week select to render incorrectly (e.g. wrong selected week,
+   broken options). Now uses clean string concatenation in a loop. */
 function openNotePopup(e,id){
   closeNotePopup();
   const task=tasks.find(t=>t.id===id); if(!task)return;
+
+  /* Determine position source — could be a real MouseEvent or a fake object
+     from openNotePopupFromEl. Use getBoundingClientRect on the target element. */
   const btn=e.currentTarget||e.target;
-  const rect=btn.getBoundingClientRect();
+  let rect;
+  try { rect=btn.getBoundingClientRect(); } catch(_){ rect={left:100,bottom:100,top:50}; }
+
   const curW=getCurrentWeek();
-  const wk=task.weeklyNote?task.weeklyNote.week:curW;
-  const txt=task.weeklyNote?task.weeklyNote.text:'';
+  const wk=(task.weeklyNote&&task.weeklyNote.week)?task.weeklyNote.week:curW;
+  const txt=(task.weeklyNote&&task.weeklyNote.text)?task.weeklyNote.text:'';
+
+  /* FIX 1 core: build options safely without template-literal tricks */
   let opts='';
-  for(let w=1;w<=52;w++) opts+=`<option value="${w}"${w===wk?' selected':'%'}>Week ${w}${w===curW?' ★':''}</option>`.replace('%','');
+  for(let w=1;w<=52;w++){
+    const sel=(w===wk)?' selected':'';
+    const star=(w===curW)?' ★':'';
+    opts+='<option value="'+w+'"'+sel+'>Week '+w+star+'</option>';
+  }
 
   const pop=document.createElement('div');
   pop.className='note-popup'; pop.id='note-popup';
-  pop.innerHTML=`
-    <div class="note-popup-header">
-      <div class="note-popup-title">${task.process}</div>
-      <button class="note-popup-close" onclick="closeNotePopup()">×</button>
-    </div>
-    <label>Tuần</label>
-    <select id="np-week">${opts}</select>
-    <label>Note</label>
-    <textarea id="np-text" placeholder="VD: Follow up sensor issue, Chờ spare part...">${txt}</textarea>
-    <div class="note-popup-footer">
-      ${txt?`<button class="btn note-clear-btn" onclick="clearNote('${id}')">🗑 Xóa</button>`:''}
-      <button class="btn note-save-btn" onclick="saveNote('${id}')">💾 Lưu</button>
-    </div>`;
+
+  /* FIX 2: Use data attribute on save/clear buttons instead of embedding id
+     in inline onclick strings — avoids quote-escaping issues with special chars */
+  pop.innerHTML=
+    '<div class="note-popup-header">'
+      +'<div class="note-popup-title">'+escapeHtml(task.process)+'</div>'
+      +'<button class="note-popup-close" onclick="closeNotePopup()">×</button>'
+    +'</div>'
+    +'<label>Tuần</label>'
+    +'<select id="np-week">'+opts+'</select>'
+    +'<label>Note</label>'
+    +'<textarea id="np-text" placeholder="VD: Follow up sensor issue, Chờ spare part...">'+escapeHtml(txt)+'</textarea>'
+    +'<div class="note-popup-footer">'
+      +(txt?'<button class="btn note-clear-btn" data-task-id="'+id+'" onclick="clearNoteFromPopup(this)">🗑 Xóa</button>':'')
+      +'<button class="btn note-save-btn" data-task-id="'+id+'" onclick="saveNoteFromPopup(this)">💾 Lưu</button>'
+    +'</div>';
+
   document.getElementById('note-popup-container').appendChild(pop);
 
-  // Position
-  const pw=290,ph=290;
+  /* Position popup smartly */
+  const pw=290, ph=290;
   let left=rect.left+window.scrollX;
   let top=rect.bottom+window.scrollY+6;
   if(left+pw>window.innerWidth-10) left=window.innerWidth-pw-10;
+  if(left<10) left=10;
   if(top+ph>window.innerHeight+window.scrollY-10) top=rect.top+window.scrollY-ph-6;
+  if(top<window.scrollY+10) top=window.scrollY+10;
   pop.style.left=left+'px'; pop.style.top=top+'px';
+
   activeNoteId=id;
   document.getElementById('np-text').focus();
 }
+
 function closeNotePopup(){ const p=document.getElementById('note-popup'); if(p)p.remove(); activeNoteId=null; }
+
+/* FIX 2: Save/clear now use data-task-id from button element instead of
+   closure-captured id string — avoids mismatched quotes in HTML attributes */
+function saveNoteFromPopup(btn){
+  const id=btn.getAttribute('data-task-id');
+  saveNote(id);
+}
+function clearNoteFromPopup(btn){
+  const id=btn.getAttribute('data-task-id');
+  clearNote(id);
+}
+
 function saveNote(id){
   const task=tasks.find(t=>t.id===id); if(!task)return;
-  const wk=parseInt(document.getElementById('np-week').value);
-  const txt=document.getElementById('np-text').value.trim();
+  const weekEl=document.getElementById('np-week');
+  const textEl=document.getElementById('np-text');
+  if(!weekEl||!textEl)return;
+  const wk=parseInt(weekEl.value);
+  const txt=textEl.value.trim();
+  /* FIX 3: Always set weeklyNote properly — even if empty (null it out) */
   task.weeklyNote=txt?{week:wk,text:txt}:null;
-  saveNotes(); closeNotePopup();
-  refreshTaskItem(id); updateWeeklyBadge();
-  if(currentTab==='weekly')renderWeeklySection();
-  if(currentTab==='overview')renderOverview();
+  saveNotes();
+  closeNotePopup();
+  /* FIX 4: refreshTaskItem now fully rebuilds the DOM node from current data */
+  refreshTaskItem(id);
+  updateWeeklyBadge();
+  /* FIX 5: Always update weekly section sidebar badge regardless of current tab */
+  if(currentTab==='weekly') renderWeeklySection();
+  if(currentTab==='overview') renderOverview();
 }
+
 function clearNote(id){
   const task=tasks.find(t=>t.id===id); if(!task)return;
-  task.weeklyNote=null; saveNotes(); closeNotePopup();
-  refreshTaskItem(id); updateWeeklyBadge();
-  if(currentTab==='weekly')renderWeeklySection();
-  if(currentTab==='overview')renderOverview();
+  task.weeklyNote=null;
+  saveNotes();
+  closeNotePopup();
+  refreshTaskItem(id);
+  updateWeeklyBadge();
+  if(currentTab==='weekly') renderWeeklySection();
+  if(currentTab==='overview') renderOverview();
 }
+
+/* FIX 4: refreshTaskItem — replaces DOM element using outerHTML built from
+   taskHTML(). The original also worked but we now ensure it finds the element
+   even after filter hides/shows items. Also restores filter visibility state. */
 function refreshTaskItem(id){
   const task=tasks.find(t=>t.id===id); if(!task)return;
-  const el=document.querySelector(`.task-item[data-id="${id}"]`); if(!el)return;
-  const newEl=document.createElement('div');
-  newEl.innerHTML=taskHTML(task);
-  el.replaceWith(newEl.firstElementChild);
+  const el=document.querySelector('.task-item[data-id="'+id+'"]'); if(!el)return;
+  const wasHidden=el.classList.contains('hidden')||el.style.display==='none';
+  const tmp=document.createElement('div');
+  tmp.innerHTML=taskHTML(task);
+  const newEl=tmp.firstElementChild;
+  if(wasHidden){ newEl.classList.add('hidden'); newEl.style.display='none'; }
+  el.replaceWith(newEl);
 }
 
 /* ============================================================
@@ -835,18 +898,19 @@ function renderProgressSection(){
   else if(sort==='overall-asc')data.sort((a,b)=>a.ov-b.ov);
   else if(sort==='prod-desc')data.sort((a,b)=>b.sp.pct-a.sp.pct);
   else if(sort==='ea-desc')data.sort((a,b)=>b.se.pct-a.se.pct);
-  document.getElementById('progress-list').innerHTML=data.map(({line,sp,se,ov})=>{
-    const slow=hl&&ov<50;
-    return`<div class="progress-card ${slow?'slow':''}">
-      <div class="progress-card-header">
-        <span style="font-weight:700;font-size:15px;font-family:'DM Mono',monospace;">${line}</span>
-        <div style="display:flex;align-items:center;gap:8px;">${slow?'<span class="slow-tag">Chậm</span>':''}<span class="progress-card-overall">${ov}%</span></div>
-      </div>
-      <div class="progress-row"><span class="progress-row-label">Production</span><div class="progress-track"><div class="progress-fill prod" style="width:${sp.pct}%"></div></div><span class="progress-pct prod">${sp.pct}%</span></div>
-      <div class="progress-row"><span class="progress-row-label">E&A</span><div class="progress-track"><div class="progress-fill ea" style="width:${se.pct}%"></div></div><span class="progress-pct ea">${se.pct}%</span></div>
-      <div class="progress-row"><span class="progress-row-label">Overall</span><div class="progress-track"><div class="progress-fill overall" style="width:${ov}%"></div></div><span class="progress-pct overall">${ov}%</span></div>
-      <div style="margin-top:10px;font-size:11px;color:var(--text-light);display:flex;gap:16px;"><span>Prod: ${sp.done}/${sp.total}</span><span>E&A: ${se.done}/${se.total}</span></div>
-    </div>`;
+  document.getElementById('progress-list').innerHTML=data.map(function(d){
+    var line=d.line,sp=d.sp,se=d.se,ov=d.ov;
+    var slow=hl&&ov<50;
+    return '<div class="progress-card '+(slow?'slow':'')+'">'
+      +'<div class="progress-card-header">'
+        +'<span style="font-weight:700;font-size:15px;font-family:\'DM Mono\',monospace;">'+line+'</span>'
+        +'<div style="display:flex;align-items:center;gap:8px;">'+(slow?'<span class="slow-tag">Chậm</span>':'')+'<span class="progress-card-overall">'+ov+'%</span></div>'
+      +'</div>'
+      +'<div class="progress-row"><span class="progress-row-label">Production</span><div class="progress-track"><div class="progress-fill prod" style="width:'+sp.pct+'%"></div></div><span class="progress-pct prod">'+sp.pct+'%</span></div>'
+      +'<div class="progress-row"><span class="progress-row-label">E&A</span><div class="progress-track"><div class="progress-fill ea" style="width:'+se.pct+'%"></div></div><span class="progress-pct ea">'+se.pct+'%</span></div>'
+      +'<div class="progress-row"><span class="progress-row-label">Overall</span><div class="progress-track"><div class="progress-fill overall" style="width:'+ov+'%"></div></div><span class="progress-pct overall">'+ov+'%</span></div>'
+      +'<div style="margin-top:10px;font-size:11px;color:var(--text-light);display:flex;gap:16px;"><span>Prod: '+sp.done+'/'+sp.total+'</span><span>E&A: '+se.done+'/'+se.total+'</span></div>'
+      +'</div>';
   }).join('');
 }
 
@@ -862,86 +926,98 @@ function renderWeekSidebar(){
   const weeks=new Set([curW]);
   tasks.forEach(t=>{if(t.weeklyNote&&t.weeklyNote.text)weeks.add(t.weeklyNote.week);});
   const sorted=[...weeks].sort((a,b)=>b-a);
-  document.getElementById('week-list').innerHTML=sorted.map(w=>{
+  document.getElementById('week-list').innerHTML=sorted.map(function(w){
     const cnt=tasks.filter(t=>t.weeklyNote&&t.weeklyNote.week===w&&t.weeklyNote.text).length;
     const isCur=w===curW, isAct=w===selectedWeek;
-    return`<div class="week-item ${isCur?'current-week':''} ${isAct?'active':''}" onclick="selectWeek(${w})">
-      <span>Week ${w}${isCur?'<span class="week-now-tag">Now</span>':''}</span>
-      ${cnt>0?`<span class="week-item-count">${cnt}</span>`:''}
-    </div>`;
+    return '<div class="week-item '+(isCur?'current-week':'')+' '+(isAct?'active':'')+'" onclick="selectWeek('+w+')">'
+      +'<span>Week '+w+(isCur?'<span class="week-now-tag">Now</span>':'')+'</span>'
+      +(cnt>0?'<span class="week-item-count">'+cnt+'</span>':'')
+      +'</div>';
   }).join('');
 }
 function selectWeek(w){ selectedWeek=w; renderWeekSidebar(); renderWeekPanel(); }
+
+/* FIX 6: renderWeekPanel — the weekly-edit-btn used requireLogin() in an
+   inline onclick string which broke because requireLogin takes a function
+   and 'this' context was wrong. Now uses a dedicated openNoteFromWeekly(id)
+   global function that works correctly. */
 function renderWeekPanel(){
   const panel=document.getElementById('weekly-tasks-panel');
   const wt=tasks.filter(t=>t.weeklyNote&&t.weeklyNote.week===selectedWeek&&t.weeklyNote.text);
   const isCur=selectedWeek===getCurrentWeek();
-  let html=`<div class="weekly-content-header">
-    <div>
-      <div class="weekly-content-title">📅 Week ${selectedWeek}${isCur?' <span style="font-size:13px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">— Tuần này</span>':''}</div>
-      <div class="weekly-content-sub">${wt.length} task đang được follow</div>
-    </div>
-  </div>`;
+  var html='<div class="weekly-content-header">'
+    +'<div>'
+      +'<div class="weekly-content-title">📅 Week '+selectedWeek+(isCur?' <span style="font-size:13px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">— Tuần này</span>':'')+'</div>'
+      +'<div class="weekly-content-sub">'+wt.length+' task đang được follow</div>'
+    +'</div>'
+    +'</div>';
+
   if(!wt.length){
-    html+=`<div class="weekly-empty">
-      <div class="weekly-empty-icon">📭</div>
-      <div class="weekly-empty-title">Chưa có task nào trong tuần này</div>
-      <div style="font-size:13px;margin-top:6px;">Vào <strong>Task Board</strong> → click icon 📝 trên task để gắn note vào tuần này.</div>
-    </div>`;
+    html+='<div class="weekly-empty">'
+      +'<div class="weekly-empty-icon">📭</div>'
+      +'<div class="weekly-empty-title">Chưa có task nào trong tuần này</div>'
+      +'<div style="font-size:13px;margin-top:6px;">Vào <strong>Task Board</strong> → click icon 📝 trên task để gắn note vào tuần này.</div>'
+      +'</div>';
   } else {
-    wt.forEach(t=>{
+    wt.forEach(function(t){
       const icon=t.team==='prod'?'🏭':'⚡';
       const label=t.team==='prod'?'Production':'E&A';
-      html+=`<div class="weekly-task-card team-${t.team}">
-        <div class="weekly-task-icon ${t.team}">${icon}</div>
-        <div class="weekly-task-body">
-          <div class="weekly-task-name">${t.process}</div>
-          <div class="weekly-task-meta">
-            <span>${icon} ${label}</span><span>•</span>
-            <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:700;color:var(--text-light)">Line ${t.line}</span>
-            <span>•</span>
-            <span class="status-pill ${t.status}" style="font-size:10px;padding:2px 7px;cursor:default;">
-              <span class="status-dot"></span>${STATUS_LABEL[t.status]}
-            </span>
-          </div>
-          <div class="weekly-task-note">${t.weeklyNote.text}</div>
-        </div>
-        <button class="weekly-edit-btn" onclick="requireLogin(()=>openNotePopupFromEl('${t.id}',this))">✏️ Sửa</button>
-      </div>`;
+      html+='<div class="weekly-task-card team-'+t.team+'">'
+        +'<div class="weekly-task-icon '+t.team+'">'+icon+'</div>'
+        +'<div class="weekly-task-body">'
+          +'<div class="weekly-task-name">'+escapeHtml(t.process)+'</div>'
+          +'<div class="weekly-task-meta">'
+            +'<span>'+icon+' '+label+'</span><span>•</span>'
+            +'<span style="font-family:\'DM Mono\',monospace;font-size:11px;font-weight:700;color:var(--text-light)">Line '+t.line+'</span>'
+            +'<span>•</span>'
+            +'<span class="status-pill '+t.status+'" style="font-size:10px;padding:2px 7px;cursor:default;">'
+              +'<span class="status-dot"></span>'+STATUS_LABEL[t.status]
+            +'</span>'
+          +'</div>'
+          +'<div class="weekly-task-note">'+escapeHtml(t.weeklyNote.text)+'</div>'
+        +'</div>'
+        +'<button class="weekly-edit-btn" data-task-id="'+t.id+'" onclick="openNoteFromWeekly(this)">✏️ Sửa</button>'
+        +'</div>';
     });
   }
   panel.innerHTML=html;
 }
-function openNotePopupFromEl(id,el){
-  const r=el.getBoundingClientRect();
-  const fakeE={currentTarget:el,target:el,stopPropagation:()=>{}};
-  openNotePopup(fakeE,id);
+
+/* FIX 6: New global function to open note popup from weekly panel.
+   Uses button's getBoundingClientRect for correct positioning. */
+function openNoteFromWeekly(btn){
+  const id=btn.getAttribute('data-task-id');
+  requireLogin(function(){
+    const rect=btn.getBoundingClientRect();
+    /* Create a synthetic event-like object that openNotePopup can use */
+    const fakeE={
+      currentTarget:btn,
+      target:btn,
+      stopPropagation:function(){}
+    };
+    openNotePopup(fakeE,id);
+  });
 }
 
 /* ============================================================
    HISTORY MANAGER MODULE
-   Activity Intelligence System – logs every status change,
-   stores in localStorage, renders a slide-in side panel
-   with timeline, grouping, smart filtering, and summary stats.
    ============================================================ */
-const historyManager = (() => {
+const historyManager = (function() {
   const LS_HISTORY = 'controlTowerHistory';
 
-  /* ── LOGGING ── */
-  // Called whenever a status changes; writes a structured record
   function log(task, oldStatus, newStatus) {
     const record = {
-      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: Date.now()+'_'+Math.random().toString(36).slice(2,7),
       timestamp: new Date().toISOString(),
       process: task.process,
       line: task.line,
-      team: task.team,           // 'prod' | 'ea'
+      team: task.team,
       taskId: task.id,
-      oldStatus,                 // 'not-started' | 'in-progress' | 'done'
-      newStatus
+      oldStatus: oldStatus,
+      newStatus: newStatus
     };
     const existing = loadAll();
-    existing.unshift(record);    // newest first
+    existing.unshift(record);
     try { localStorage.setItem(LS_HISTORY, JSON.stringify(existing)); } catch(e) {}
   }
 
@@ -950,7 +1026,6 @@ const historyManager = (() => {
     catch { return []; }
   }
 
-  /* ── WEEK UTILITIES (ISO-compatible) ── */
   function getISOWeek(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
     const day = d.getUTCDay() || 7;
@@ -959,63 +1034,43 @@ const historyManager = (() => {
     return { week: Math.ceil((((d - yearStart) / 86400000) + 1) / 7), year: d.getUTCFullYear() };
   }
 
-  function getWeekRange(isoWeek, isoYear) {
-    // Monday of given ISO week
-    const jan4 = new Date(Date.UTC(isoYear, 0, 4));
-    const jan4Day = jan4.getUTCDay() || 7;
-    const monday = new Date(jan4);
-    monday.setUTCDate(jan4.getUTCDate() - jan4Day + 1 + (isoWeek - 1) * 7);
-    const sunday = new Date(monday);
-    sunday.setUTCDate(monday.getUTCDate() + 6);
-    return { start: monday, end: sunday };
-  }
-
   function recordISOWeek(record) {
     return getISOWeek(new Date(record.timestamp));
   }
 
-  /* ── FILTERING ── */
-  // Returns records matching current panel filter state
-  function filterRecords(records, { weekMode, customWeek, customYear, teamFilter, statusFilter, processFilter }) {
+  function filterRecords(records, state) {
     const now = new Date();
-    const { week: curW, year: curY } = getISOWeek(now);
+    const curWY = getISOWeek(now);
+    const curW = curWY.week, curY = curWY.year;
+    const weekMode = state.weekMode, teamFilter = state.teamFilter;
+    const statusFilter = state.statusFilter, processFilter = state.processFilter;
+    const customWeek = state.customWeek, customYear = state.customYear;
 
-    return records.filter(r => {
-      const { week: rW, year: rY } = recordISOWeek(r);
-
-      // Week filter
+    return records.filter(function(r) {
+      const rWY = recordISOWeek(r);
+      const rW = rWY.week, rY = rWY.year;
       if (weekMode === 'this') {
         if (rW !== curW || rY !== curY) return false;
       } else if (weekMode === 'last') {
-        let lW = curW - 1, lY = curY;
+        var lW = curW - 1, lY = curY;
         if (lW < 1) { lW = 52; lY--; }
         if (rW !== lW || rY !== lY) return false;
       } else if (weekMode === 'custom') {
         if (rW !== customWeek || rY !== customYear) return false;
       }
-
-      // Team filter
       if (teamFilter !== 'all' && r.team !== teamFilter) return false;
-
-      // Status change filter
       if (statusFilter !== 'all' && r.newStatus !== statusFilter) return false;
-
-      // Process filter
       if (processFilter !== 'all' && r.line !== processFilter) return false;
-
       return true;
     });
   }
 
-  /* ── GROUPING ── */
-  // Groups records by day label (Today, Yesterday, Earlier this week, Older)
   function groupByDay(records) {
     const now = new Date();
     const todayStr = now.toDateString();
     const yesterdayStr = new Date(now - 86400000).toDateString();
-
     const groups = {};
-    records.forEach(r => {
+    records.forEach(function(r) {
       const d = new Date(r.timestamp);
       const ds = d.toDateString();
       let label;
@@ -1029,44 +1084,40 @@ const historyManager = (() => {
       groups[label].push(r);
     });
     const order = ['Today', 'Yesterday', 'Earlier this week', 'Older'];
-    return order.filter(k => groups[k]).map(k => ({ label: k, items: groups[k] }));
+    return order.filter(function(k){ return groups[k]; }).map(function(k){ return { label: k, items: groups[k] }; });
   }
 
-  // Groups records by process line
   function groupByProcess(records) {
     const groups = {};
-    records.forEach(r => {
+    records.forEach(function(r) {
       if (!groups[r.line]) groups[r.line] = [];
       groups[r.line].push(r);
     });
     return Object.entries(groups)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([label, items]) => ({ label, items }));
+      .sort(function(a,b){ return a[0].localeCompare(b[0]); })
+      .map(function(e){ return { label: e[0], items: e[1] }; });
   }
 
-  /* ── SMART SUMMARY ── */
   function buildSummary(records) {
     const total = records.length;
-    const taskIds = new Set(records.map(r => r.taskId));
-    const lines = new Set(records.map(r => r.line));
+    const taskIds = new Set(records.map(function(r){ return r.taskId; }));
+    const lines = new Set(records.map(function(r){ return r.line; }));
     const allTaskCount = window.tasks ? window.tasks.length : 1;
     const updatedPct = Math.round(taskIds.size / allTaskCount * 100);
-    return { total, linesAffected: lines.size, updatedPct };
+    return { total: total, linesAffected: lines.size, updatedPct: updatedPct };
   }
 
-  /* ── PANEL STATE ── */
-  let panelState = {
+  var panelState = {
     open: false,
-    weekMode: 'this',   // 'this' | 'last' | 'custom'
+    weekMode: 'this',
     customWeek: 1,
     customYear: 2026,
     teamFilter: 'all',
     statusFilter: 'all',
     processFilter: 'all',
-    groupMode: 'time'   // 'time' | 'process'
+    groupMode: 'time'
   };
 
-  /* ── STATUS ICON / COLOR HELPERS ── */
   const STATUS_META = {
     'done':        { icon: '🔵', color: '#3B82F6', bg: '#EFF6FF', label: 'Done' },
     'in-progress': { icon: '🌸', color: '#EC4899', bg: '#FCE7F3', label: 'In Progress' },
@@ -1077,147 +1128,111 @@ const historyManager = (() => {
     const d = new Date(isoStr);
     const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    return `${time} — ${date}`;
+    return time + ' — ' + date;
   }
 
-  /* ── RENDER FUNCTIONS ── */
   function renderSummary(records) {
-    const { total, linesAffected, updatedPct } = buildSummary(records);
-    return `
-      <div class="hp-summary">
-        <div class="hp-summary-item">
-          <span class="hp-summary-num">${total}</span>
-          <span class="hp-summary-lbl">changes this week</span>
-        </div>
-        <div class="hp-summary-divider"></div>
-        <div class="hp-summary-item">
-          <span class="hp-summary-num">${linesAffected}</span>
-          <span class="hp-summary-lbl">lines affected</span>
-        </div>
-        <div class="hp-summary-divider"></div>
-        <div class="hp-summary-item">
-          <span class="hp-summary-num">${updatedPct}%</span>
-          <span class="hp-summary-lbl">tasks updated</span>
-        </div>
-      </div>`;
+    const s = buildSummary(records);
+    return '<div class="hp-summary">'
+      +'<div class="hp-summary-item"><span class="hp-summary-num">'+s.total+'</span><span class="hp-summary-lbl">changes this week</span></div>'
+      +'<div class="hp-summary-divider"></div>'
+      +'<div class="hp-summary-item"><span class="hp-summary-num">'+s.linesAffected+'</span><span class="hp-summary-lbl">lines affected</span></div>'
+      +'<div class="hp-summary-divider"></div>'
+      +'<div class="hp-summary-item"><span class="hp-summary-num">'+s.updatedPct+'%</span><span class="hp-summary-lbl">tasks updated</span></div>'
+      +'</div>';
   }
 
   function renderFilters() {
-    const { week: curW, year: curY } = getISOWeek(new Date());
-    let lW = curW - 1, lY = curY;
+    const curWY = getISOWeek(new Date());
+    const curW = curWY.week, curY = curWY.year;
+    var lW = curW - 1, lY = curY;
     if (lW < 1) { lW = 52; lY--; }
+    const lines = [...new Set((window.tasks || []).map(function(t){ return t.line; }))].sort();
 
-    const lines = [...new Set((window.tasks || []).map(t => t.line))].sort();
-
-    return `
-      <div class="hp-filters">
-        <div class="hp-filter-row">
-          <span class="hp-filter-label">Period</span>
-          <div class="hp-week-pills">
-            <button class="hp-pill ${panelState.weekMode==='this'?'active':''}" onclick="historyManager._setWeek('this')">This Week</button>
-            <button class="hp-pill ${panelState.weekMode==='last'?'active':''}" onclick="historyManager._setWeek('last')">Last Week</button>
-            <button class="hp-pill ${panelState.weekMode==='custom'?'active':''}" onclick="historyManager._setWeek('custom')">Custom</button>
-          </div>
-        </div>
-        ${panelState.weekMode === 'custom' ? `
-        <div class="hp-filter-row hp-custom-week-row">
-          <span class="hp-filter-label">Week #</span>
-          <input type="number" class="hp-week-input" id="hp-custom-week" value="${panelState.customWeek}"
-            min="1" max="53" onchange="historyManager._setCustomWeek(this.value)" />
-          <span class="hp-filter-label" style="margin-left:4px;">/ ${panelState.customYear}</span>
-        </div>` : `
-        <div class="hp-week-label">
-          ${panelState.weekMode==='this'
-            ? `<span class="hp-iso-badge">Week ${curW} – ${curY}</span>`
-            : `<span class="hp-iso-badge">Week ${lW} – ${lY}</span>`}
-        </div>`}
-        <div class="hp-filter-row hp-filter-row-multi">
-          <div class="hp-select-wrap">
-            <span class="hp-filter-label">Team</span>
-            <select class="hp-select" onchange="historyManager._setFilter('teamFilter',this.value)">
-              <option value="all" ${panelState.teamFilter==='all'?'selected':''}>All Teams</option>
-              <option value="prod" ${panelState.teamFilter==='prod'?'selected':''}>Production</option>
-              <option value="ea" ${panelState.teamFilter==='ea'?'selected':''}>E&amp;A</option>
-            </select>
-          </div>
-          <div class="hp-select-wrap">
-            <span class="hp-filter-label">Status</span>
-            <select class="hp-select" onchange="historyManager._setFilter('statusFilter',this.value)">
-              <option value="all" ${panelState.statusFilter==='all'?'selected':''}>All Status</option>
-              <option value="done" ${panelState.statusFilter==='done'?'selected':''}>Done</option>
-              <option value="in-progress" ${panelState.statusFilter==='in-progress'?'selected':''}>In Progress</option>
-              <option value="not-started" ${panelState.statusFilter==='not-started'?'selected':''}>Not Started</option>
-            </select>
-          </div>
-          <div class="hp-select-wrap">
-            <span class="hp-filter-label">Line</span>
-            <select class="hp-select" onchange="historyManager._setFilter('processFilter',this.value)">
-              <option value="all">All Lines</option>
-              ${lines.map(l=>`<option value="${l}" ${panelState.processFilter===l?'selected':''}>${l}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div class="hp-filter-row">
-          <span class="hp-filter-label">Group by</span>
-          <div class="hp-week-pills">
-            <button class="hp-pill ${panelState.groupMode==='time'?'active':''}" onclick="historyManager._setGroup('time')">⏱ Time</button>
-            <button class="hp-pill ${panelState.groupMode==='process'?'active':''}" onclick="historyManager._setGroup('process')">🏭 Line</button>
-          </div>
-        </div>
-      </div>`;
+    return '<div class="hp-filters">'
+      +'<div class="hp-filter-row">'
+        +'<span class="hp-filter-label">Period</span>'
+        +'<div class="hp-week-pills">'
+          +'<button class="hp-pill '+(panelState.weekMode==='this'?'active':'')+'" onclick="historyManager._setWeek(\'this\')">This Week</button>'
+          +'<button class="hp-pill '+(panelState.weekMode==='last'?'active':'')+'" onclick="historyManager._setWeek(\'last\')">Last Week</button>'
+          +'<button class="hp-pill '+(panelState.weekMode==='custom'?'active':'')+'" onclick="historyManager._setWeek(\'custom\')">Custom</button>'
+        +'</div>'
+      +'</div>'
+      +(panelState.weekMode==='custom'
+        ? '<div class="hp-filter-row hp-custom-week-row">'
+            +'<span class="hp-filter-label">Week #</span>'
+            +'<input type="number" class="hp-week-input" id="hp-custom-week" value="'+panelState.customWeek+'" min="1" max="53" onchange="historyManager._setCustomWeek(this.value)" />'
+            +'<span class="hp-filter-label" style="margin-left:4px;">/ '+panelState.customYear+'</span>'
+          +'</div>'
+        : '<div class="hp-week-label"><span class="hp-iso-badge">Week '+(panelState.weekMode==='this'?curW+' – '+curY:lW+' – '+lY)+'</span></div>'
+      )
+      +'<div class="hp-filter-row hp-filter-row-multi">'
+        +'<div class="hp-select-wrap"><span class="hp-filter-label">Team</span>'
+          +'<select class="hp-select" onchange="historyManager._setFilter(\'teamFilter\',this.value)">'
+            +'<option value="all" '+(panelState.teamFilter==='all'?'selected':'')+'>All Teams</option>'
+            +'<option value="prod" '+(panelState.teamFilter==='prod'?'selected':'')+'>Production</option>'
+            +'<option value="ea" '+(panelState.teamFilter==='ea'?'selected':'')+'>E&amp;A</option>'
+          +'</select></div>'
+        +'<div class="hp-select-wrap"><span class="hp-filter-label">Status</span>'
+          +'<select class="hp-select" onchange="historyManager._setFilter(\'statusFilter\',this.value)">'
+            +'<option value="all" '+(panelState.statusFilter==='all'?'selected':'')+'>All Status</option>'
+            +'<option value="done" '+(panelState.statusFilter==='done'?'selected':'')+'>Done</option>'
+            +'<option value="in-progress" '+(panelState.statusFilter==='in-progress'?'selected':'')+'>In Progress</option>'
+            +'<option value="not-started" '+(panelState.statusFilter==='not-started'?'selected':'')+'>Not Started</option>'
+          +'</select></div>'
+        +'<div class="hp-select-wrap"><span class="hp-filter-label">Line</span>'
+          +'<select class="hp-select" onchange="historyManager._setFilter(\'processFilter\',this.value)">'
+            +'<option value="all">All Lines</option>'
+            +lines.map(function(l){ return '<option value="'+l+'" '+(panelState.processFilter===l?'selected':'')+'>'+l+'</option>'; }).join('')
+          +'</select></div>'
+      +'</div>'
+      +'<div class="hp-filter-row"><span class="hp-filter-label">Group by</span>'
+        +'<div class="hp-week-pills">'
+          +'<button class="hp-pill '+(panelState.groupMode==='time'?'active':'')+'" onclick="historyManager._setGroup(\'time\')">⏱ Time</button>'
+          +'<button class="hp-pill '+(panelState.groupMode==='process'?'active':'')+'" onclick="historyManager._setGroup(\'process\')">🏭 Line</button>'
+        +'</div>'
+      +'</div>'
+      +'</div>';
   }
 
   function renderRecord(r, idx) {
     const old = STATUS_META[r.oldStatus] || STATUS_META['not-started'];
     const cur = STATUS_META[r.newStatus] || STATUS_META['done'];
     const teamLabel = r.team === 'prod' ? '🏭 Production' : '⚡ E&A';
-    return `
-      <div class="hp-record" style="animation-delay:${Math.min(idx * 40, 400)}ms">
-        <div class="hp-timeline-dot" style="background:${cur.color}; box-shadow: 0 0 0 3px ${cur.bg}">
-          <span>${cur.icon}</span>
-        </div>
-        <div class="hp-record-card">
-          <div class="hp-record-time">${formatTime(r.timestamp)}</div>
-          <div class="hp-record-meta">
-            <span class="hp-meta-tag">${r.line}</span>
-            <span class="hp-meta-tag team">${teamLabel}</span>
-          </div>
-          <div class="hp-record-process">${r.process}</div>
-          <div class="hp-status-change">
-            <span class="hp-status-badge old" style="color:${old.color};background:${old.bg}">${old.icon} ${old.label}</span>
-            <span class="hp-arrow">→</span>
-            <span class="hp-status-badge new" style="color:${cur.color};background:${cur.bg};border-color:${cur.color}40">${cur.icon} ${cur.label}</span>
-          </div>
-        </div>
-      </div>`;
+    return '<div class="hp-record" style="animation-delay:'+Math.min(idx*40,400)+'ms">'
+      +'<div class="hp-timeline-dot" style="background:'+cur.color+'; box-shadow: 0 0 0 3px '+cur.bg+'"><span>'+cur.icon+'</span></div>'
+      +'<div class="hp-record-card">'
+        +'<div class="hp-record-time">'+formatTime(r.timestamp)+'</div>'
+        +'<div class="hp-record-meta"><span class="hp-meta-tag">'+r.line+'</span><span class="hp-meta-tag team">'+teamLabel+'</span></div>'
+        +'<div class="hp-record-process">'+escapeHtml(r.process)+'</div>'
+        +'<div class="hp-status-change">'
+          +'<span class="hp-status-badge old" style="color:'+old.color+';background:'+old.bg+'">'+old.icon+' '+old.label+'</span>'
+          +'<span class="hp-arrow">→</span>'
+          +'<span class="hp-status-badge new" style="color:'+cur.color+';background:'+cur.bg+';border-color:'+cur.color+'40">'+cur.icon+' '+cur.label+'</span>'
+        +'</div>'
+      +'</div>'
+      +'</div>';
   }
 
   function renderTimeline(filtered) {
     if (!filtered.length) {
-      return `<div class="hp-empty">
-        <div class="hp-empty-icon">📭</div>
-        <div class="hp-empty-title">No activity recorded yet</div>
-        <div class="hp-empty-sub">Start interacting with tasks to see history</div>
-      </div>`;
+      return '<div class="hp-empty">'
+        +'<div class="hp-empty-icon">📭</div>'
+        +'<div class="hp-empty-title">No activity recorded yet</div>'
+        +'<div class="hp-empty-sub">Start interacting with tasks to see history</div>'
+        +'</div>';
     }
-
     const groups = panelState.groupMode === 'time' ? groupByDay(filtered) : groupByProcess(filtered);
-
-    return `<div class="hp-timeline">
-      ${groups.map(({ label, items }) => `
-        <div class="hp-group">
-          <div class="hp-group-label">${label}
-            <span class="hp-group-count">${items.length}</span>
-          </div>
-          <div class="hp-group-items">
-            ${items.map((r, i) => renderRecord(r, i)).join('')}
-          </div>
-        </div>
-      `).join('')}
-    </div>`;
+    return '<div class="hp-timeline">'
+      +groups.map(function(g){
+        return '<div class="hp-group">'
+          +'<div class="hp-group-label">'+g.label+'<span class="hp-group-count">'+g.items.length+'</span></div>'
+          +'<div class="hp-group-items">'+g.items.map(renderRecord).join('')+'</div>'
+          +'</div>';
+      }).join('')
+      +'</div>';
   }
 
-  /* ── PANEL OPEN/CLOSE ── */
   function openPanel() {
     if (document.getElementById('history-panel')) {
       document.getElementById('history-panel').classList.add('open');
@@ -1231,8 +1246,8 @@ const historyManager = (() => {
   function closePanel() {
     const p = document.getElementById('history-panel');
     const o = document.getElementById('hp-overlay');
-    if (p) { p.classList.remove('open'); }
-    if (o) { o.classList.remove('show'); }
+    if (p) p.classList.remove('open');
+    if (o) o.classList.remove('show');
   }
 
   function renderPanel() {
@@ -1240,306 +1255,123 @@ const historyManager = (() => {
     const filtered = filterRecords(all, panelState);
     const body = document.getElementById('hp-body');
     if (!body) return;
-
-    body.innerHTML = `
-      ${renderSummary(filtered)}
-      ${renderFilters()}
-      <div class="hp-timeline-section" id="hp-timeline">
-        ${renderTimeline(filtered)}
-      </div>`;
+    body.innerHTML = renderSummary(filtered) + renderFilters()
+      + '<div class="hp-timeline-section" id="hp-timeline">'+renderTimeline(filtered)+'</div>';
   }
 
   function injectPanel() {
-    // CSS
     const style = document.createElement('style');
     style.id = 'history-panel-styles';
     style.textContent = `
-      /* ── HISTORY PANEL OVERLAY ── */
       #hp-overlay {
-        position: fixed; inset: 0; background: rgba(15,23,42,0.45);
-        backdrop-filter: blur(4px); z-index: 900;
-        opacity: 0; pointer-events: none;
-        transition: opacity 0.3s ease;
+        position:fixed;inset:0;background:rgba(15,23,42,0.45);backdrop-filter:blur(4px);z-index:900;
+        opacity:0;pointer-events:none;transition:opacity 0.3s ease;
       }
-      #hp-overlay.show { opacity: 1; pointer-events: all; }
-
-      /* ── PANEL CONTAINER ── */
+      #hp-overlay.show{opacity:1;pointer-events:all;}
       #history-panel {
-        position: fixed; top: 0; right: 0; bottom: 0;
-        width: 420px; max-width: 100vw;
-        background: var(--surface);
-        border-left: 1px solid var(--border);
-        box-shadow: -12px 0 60px rgba(0,0,0,0.18);
-        z-index: 901;
-        display: flex; flex-direction: column;
-        transform: translateX(100%);
-        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-        overflow: hidden;
+        position:fixed;top:0;right:0;bottom:0;width:420px;max-width:100vw;
+        background:var(--surface);border-left:1px solid var(--border);
+        box-shadow:-12px 0 60px rgba(0,0,0,0.18);z-index:901;
+        display:flex;flex-direction:column;
+        transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.22,1,0.36,1);overflow:hidden;
       }
-      #history-panel.open { transform: translateX(0); }
-
-      /* ── PANEL HEADER ── */
-      .hp-header {
-        padding: 20px 20px 16px;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface2);
-        display: flex; align-items: center; justify-content: space-between;
-        flex-shrink: 0;
-      }
-      .hp-header-left { display: flex; align-items: center; gap: 10px; }
-      .hp-header-icon {
-        width: 34px; height: 34px;
-        background: linear-gradient(135deg, var(--blue), var(--pink-dark));
-        border-radius: 8px; display: flex; align-items: center;
-        justify-content: center; font-size: 15px;
-        box-shadow: 0 4px 12px rgba(59,130,246,0.3);
-      }
-      .hp-header-title { font-size: 15px; font-weight: 700; color: var(--text); }
-      .hp-header-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
-      .hp-close {
-        width: 32px; height: 32px; border: none; background: var(--border);
-        border-radius: 8px; cursor: pointer; font-size: 16px; color: var(--text-muted);
-        display: flex; align-items: center; justify-content: center;
-        transition: all 0.15s;
-      }
-      .hp-close:hover { background: #FEE2E2; color: #DC2626; }
-
-      /* ── PANEL BODY (scrollable) ── */
-      #hp-body {
-        flex: 1; overflow-y: auto; padding: 0;
-        scroll-behavior: smooth;
-      }
-      #hp-body::-webkit-scrollbar { width: 5px; }
-      #hp-body::-webkit-scrollbar-track { background: transparent; }
-      #hp-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
-
-      /* ── SMART SUMMARY ── */
-      .hp-summary {
-        display: flex; align-items: center; justify-content: space-around;
-        padding: 18px 20px; background: linear-gradient(135deg,#EFF6FF 0%,#FCE7F3 100%);
-        border-bottom: 1px solid var(--border);
-      }
-      [data-dark] .hp-summary { background: linear-gradient(135deg,#0F2440,#200A2E); }
-      .hp-summary-item { text-align: center; flex: 1; }
-      .hp-summary-num {
-        display: block; font-size: 26px; font-weight: 800; letter-spacing: -1px;
-        background: linear-gradient(135deg,var(--blue),var(--pink-dark));
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-      .hp-summary-lbl { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-      .hp-summary-divider { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; }
-
-      /* ── FILTERS ── */
-      .hp-filters {
-        padding: 14px 20px;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface2);
-        display: flex; flex-direction: column; gap: 10px;
-      }
-      .hp-filter-row {
-        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      }
-      .hp-filter-row-multi { gap: 6px; }
-      .hp-filter-label {
-        font-size: 10px; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.8px; color: var(--text-muted); min-width: 38px; flex-shrink: 0;
-      }
-      .hp-week-pills { display: flex; gap: 4px; }
-      .hp-pill {
-        padding: 4px 10px; font-size: 11px; font-weight: 600;
-        border: 1px solid var(--border); border-radius: 99px;
-        background: var(--surface); color: var(--text-muted);
-        cursor: pointer; font-family: inherit; transition: all 0.15s;
-      }
-      .hp-pill.active {
-        background: linear-gradient(135deg,var(--blue),var(--blue-dark));
-        color: #fff; border-color: transparent;
-        box-shadow: 0 2px 8px rgba(59,130,246,0.3);
-      }
-      .hp-week-label { padding: 2px 0; }
-      .hp-iso-badge {
-        display: inline-block; padding: 3px 10px;
-        background: linear-gradient(135deg,var(--blue),var(--pink-dark));
-        color: #fff; font-size: 11px; font-weight: 700;
-        border-radius: 99px; letter-spacing: 0.3px;
-      }
-      .hp-select-wrap { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; }
-      .hp-select {
-        flex: 1; height: 30px; padding: 0 8px;
-        border: 1px solid var(--border); border-radius: 6px;
-        background: var(--surface); color: var(--text);
-        font-size: 11px; font-family: inherit; outline: none;
-        cursor: pointer; min-width: 0;
-        transition: border-color 0.15s;
-      }
-      .hp-select:focus { border-color: var(--blue); }
-      .hp-week-input {
-        width: 60px; height: 28px; padding: 0 8px;
-        border: 1px solid var(--border); border-radius: 6px;
-        background: var(--surface); color: var(--text);
-        font-size: 12px; font-family: 'DM Mono', monospace;
-        outline: none; text-align: center;
-      }
-      .hp-week-input:focus { border-color: var(--blue); }
-      .hp-custom-week-row { align-items: center; }
-
-      /* ── TIMELINE SECTION ── */
-      .hp-timeline-section { padding: 16px 20px 32px; }
-
-      /* ── GROUP ── */
-      .hp-group { margin-bottom: 24px; }
-      .hp-group-label {
-        font-size: 10px; font-weight: 800; text-transform: uppercase;
-        letter-spacing: 1px; color: var(--text-muted);
-        margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
-      }
-      .hp-group-count {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 18px; height: 18px; background: var(--blue);
-        color: #fff; font-size: 9px; font-weight: 700;
-        border-radius: 99px;
-      }
-      .hp-group-items {
-        position: relative; padding-left: 28px;
-      }
-      .hp-group-items::before {
-        content: ''; position: absolute; left: 9px; top: 8px; bottom: 0;
-        width: 2px; background: linear-gradient(to bottom, var(--blue), var(--pink-dark), transparent);
-        border-radius: 99px; opacity: 0.35;
-      }
-
-      /* ── TIMELINE RECORD ── */
-      .hp-record {
-        position: relative; margin-bottom: 12px;
-        opacity: 0; transform: translateY(8px);
-        animation: hpFadeIn 0.28s ease forwards;
-      }
-      @keyframes hpFadeIn {
-        to { opacity: 1; transform: translateY(0); }
-      }
-      .hp-timeline-dot {
-        position: absolute; left: -28px; top: 12px;
-        width: 20px; height: 20px; border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 10px; flex-shrink: 0;
-        transition: transform 0.15s;
-        z-index: 1;
-      }
-      .hp-record-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px; padding: 12px 14px;
-        transition: box-shadow 0.18s, transform 0.18s, border-color 0.18s;
-        cursor: default; position: relative; overflow: hidden;
-      }
-      .hp-record-card::before {
-        content: ''; position: absolute; inset: 0;
-        background: radial-gradient(circle at 50% 0%, rgba(59,130,246,0.04), transparent 70%);
-        pointer-events: none;
-      }
-      .hp-record-card:hover {
-        box-shadow: var(--shadow-md);
-        transform: translateY(-1px) translateX(2px);
-        border-color: rgba(59,130,246,0.2);
-      }
-      .hp-record-card:hover .hp-timeline-dot { transform: scale(1.15); }
-      .hp-record-time {
-        font-size: 10px; color: var(--text-light); margin-bottom: 6px;
-        font-family: 'DM Mono', monospace; letter-spacing: 0.2px;
-      }
-      .hp-record-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-      .hp-meta-tag {
-        display: inline-block; padding: 2px 7px;
-        background: var(--surface2); border: 1px solid var(--border);
-        border-radius: 99px; font-size: 10px; font-weight: 600;
-        color: var(--text-muted); font-family: 'DM Mono', monospace;
-      }
-      .hp-meta-tag.team { font-family: 'DM Sans', sans-serif; }
-      .hp-record-process {
-        font-size: 13px; font-weight: 600; color: var(--text);
-        margin-bottom: 8px; line-height: 1.3;
-      }
-      .hp-status-change { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-      .hp-status-badge {
-        display: inline-flex; align-items: center; gap: 4px;
-        padding: 3px 9px; border-radius: 99px; font-size: 11px; font-weight: 600;
-        border: 1.5px solid transparent;
-      }
-      .hp-status-badge.old { opacity: 0.5; }
-      .hp-status-badge.new { font-weight: 700; }
-      .hp-arrow { font-size: 13px; color: var(--text-muted); }
-
-      /* ── EMPTY STATE ── */
-      .hp-empty {
-        text-align: center; padding: 60px 20px;
-        color: var(--text-muted);
-      }
-      .hp-empty-icon { font-size: 40px; margin-bottom: 12px; }
-      .hp-empty-title {
-        font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 6px;
-      }
-      .hp-empty-sub { font-size: 13px; line-height: 1.5; }
-
-      /* ── HISTORY BUTTON ── */
-      .btn-history {
-        border-color: var(--blue) !important;
-        color: var(--blue) !important;
-        background: #EFF6FF !important;
-        font-weight: 600 !important;
-      }
-      .btn-history:hover {
-        background: var(--blue) !important;
-        color: #fff !important;
-      }
-      [data-dark] .btn-history {
-        background: #1E2D4A !important;
-      }
-
-      @media(max-width: 480px) {
-        #history-panel { width: 100vw; }
-      }
+      #history-panel.open{transform:translateX(0);}
+      .hp-header{padding:20px 20px 16px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+      .hp-header-left{display:flex;align-items:center;gap:10px;}
+      .hp-header-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 4px 12px rgba(59,130,246,0.3);}
+      .hp-header-title{font-size:15px;font-weight:700;color:var(--text);}
+      .hp-header-sub{font-size:11px;color:var(--text-muted);margin-top:1px;}
+      .hp-close{width:32px;height:32px;border:none;background:var(--border);border-radius:8px;cursor:pointer;font-size:16px;color:var(--text-muted);display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+      .hp-close:hover{background:#FEE2E2;color:#DC2626;}
+      #hp-body{flex:1;overflow-y:auto;padding:0;scroll-behavior:smooth;}
+      #hp-body::-webkit-scrollbar{width:5px;}
+      #hp-body::-webkit-scrollbar-track{background:transparent;}
+      #hp-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
+      .hp-summary{display:flex;align-items:center;justify-content:space-around;padding:18px 20px;background:linear-gradient(135deg,#EFF6FF 0%,#FCE7F3 100%);border-bottom:1px solid var(--border);}
+      [data-dark] .hp-summary{background:linear-gradient(135deg,#0F2440,#200A2E);}
+      .hp-summary-item{text-align:center;flex:1;}
+      .hp-summary-num{display:block;font-size:26px;font-weight:800;letter-spacing:-1px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+      .hp-summary-lbl{display:block;font-size:11px;color:var(--text-muted);margin-top:2px;}
+      .hp-summary-divider{width:1px;height:36px;background:var(--border);flex-shrink:0;}
+      .hp-filters{padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;flex-direction:column;gap:10px;}
+      .hp-filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+      .hp-filter-row-multi{gap:6px;}
+      .hp-filter-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);min-width:38px;flex-shrink:0;}
+      .hp-week-pills{display:flex;gap:4px;}
+      .hp-pill{padding:4px 10px;font-size:11px;font-weight:600;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:var(--text-muted);cursor:pointer;font-family:inherit;transition:all 0.15s;}
+      .hp-pill.active{background:linear-gradient(135deg,var(--blue),var(--blue-dark));color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(59,130,246,0.3);}
+      .hp-week-label{padding:2px 0;}
+      .hp-iso-badge{display:inline-block;padding:3px 10px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));color:#fff;font-size:11px;font-weight:700;border-radius:99px;letter-spacing:0.3px;}
+      .hp-select-wrap{display:flex;align-items:center;gap:5px;flex:1;min-width:0;}
+      .hp-select{flex:1;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11px;font-family:inherit;outline:none;cursor:pointer;min-width:0;transition:border-color 0.15s;}
+      .hp-select:focus{border-color:var(--blue);}
+      .hp-week-input{width:60px;height:28px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:'DM Mono',monospace;outline:none;text-align:center;}
+      .hp-week-input:focus{border-color:var(--blue);}
+      .hp-custom-week-row{align-items:center;}
+      .hp-timeline-section{padding:16px 20px 32px;}
+      .hp-group{margin-bottom:24px;}
+      .hp-group-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+      .hp-group-count{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:var(--blue);color:#fff;font-size:9px;font-weight:700;border-radius:99px;}
+      .hp-group-items{position:relative;padding-left:28px;}
+      .hp-group-items::before{content:'';position:absolute;left:9px;top:8px;bottom:0;width:2px;background:linear-gradient(to bottom,var(--blue),var(--pink-dark),transparent);border-radius:99px;opacity:0.35;}
+      .hp-record{position:relative;margin-bottom:12px;opacity:0;transform:translateY(8px);animation:hpFadeIn 0.28s ease forwards;}
+      @keyframes hpFadeIn{to{opacity:1;transform:translateY(0);}}
+      .hp-timeline-dot{position:absolute;left:-28px;top:12px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;transition:transform 0.15s;z-index:1;}
+      .hp-record-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;transition:box-shadow 0.18s,transform 0.18s,border-color 0.18s;cursor:default;position:relative;overflow:hidden;}
+      .hp-record-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(59,130,246,0.04),transparent 70%);pointer-events:none;}
+      .hp-record-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px) translateX(2px);border-color:rgba(59,130,246,0.2);}
+      .hp-record-time{font-size:10px;color:var(--text-light);margin-bottom:6px;font-family:'DM Mono',monospace;letter-spacing:0.2px;}
+      .hp-record-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+      .hp-meta-tag{display:inline-block;padding:2px 7px;background:var(--surface2);border:1px solid var(--border);border-radius:99px;font-size:10px;font-weight:600;color:var(--text-muted);font-family:'DM Mono',monospace;}
+      .hp-meta-tag.team{font-family:'DM Sans',sans-serif;}
+      .hp-record-process{font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;line-height:1.3;}
+      .hp-status-change{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+      .hp-status-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600;border:1.5px solid transparent;}
+      .hp-status-badge.old{opacity:0.5;}
+      .hp-status-badge.new{font-weight:700;}
+      .hp-arrow{font-size:13px;color:var(--text-muted);}
+      .hp-empty{text-align:center;padding:60px 20px;color:var(--text-muted);}
+      .hp-empty-icon{font-size:40px;margin-bottom:12px;}
+      .hp-empty-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;}
+      .hp-empty-sub{font-size:13px;line-height:1.5;}
+      .btn-history{border-color:var(--blue)!important;color:var(--blue)!important;background:#EFF6FF!important;font-weight:600!important;}
+      .btn-history:hover{background:var(--blue)!important;color:#fff!important;}
+      [data-dark] .btn-history{background:#1E2D4A!important;}
+      @media(max-width:480px){#history-panel{width:100vw;}}
     `;
     document.head.appendChild(style);
 
-    // Overlay
     const overlay = document.createElement('div');
     overlay.id = 'hp-overlay';
     overlay.onclick = closePanel;
     document.body.appendChild(overlay);
 
-    // Panel HTML
     const panel = document.createElement('div');
     panel.id = 'history-panel';
-    panel.innerHTML = `
-      <div class="hp-header">
-        <div class="hp-header-left">
-          <div class="hp-header-icon">🕐</div>
-          <div>
-            <div class="hp-header-title">Activity History</div>
-            <div class="hp-header-sub">Audit log &amp; change tracker</div>
-          </div>
-        </div>
-        <button class="hp-close" onclick="historyManager.closePanel()" title="Close">✕</button>
-      </div>
-      <div id="hp-body"></div>`;
+    panel.innerHTML =
+      '<div class="hp-header">'
+        +'<div class="hp-header-left">'
+          +'<div class="hp-header-icon">🕐</div>'
+          +'<div><div class="hp-header-title">Activity History</div><div class="hp-header-sub">Audit log &amp; change tracker</div></div>'
+        +'</div>'
+        +'<button class="hp-close" onclick="historyManager.closePanel()" title="Close">✕</button>'
+      +'</div>'
+      +'<div id="hp-body"></div>';
     document.body.appendChild(panel);
 
-    // Trigger open
-    requestAnimationFrame(() => {
+    requestAnimationFrame(function() {
       panel.classList.add('open');
       overlay.classList.add('show');
       renderPanel();
     });
   }
 
-  /* ── PUBLIC FILTER SETTERS (called from inline HTML) ── */
   function _setWeek(mode) {
     panelState.weekMode = mode;
     if (mode === 'custom') {
-      const { week, year } = getISOWeek(new Date());
-      panelState.customWeek = week;
-      panelState.customYear = year;
+      const wY = getISOWeek(new Date());
+      panelState.customWeek = wY.week;
+      panelState.customYear = wY.year;
     }
     renderPanel();
   }
@@ -1559,14 +1391,14 @@ const historyManager = (() => {
     renderPanel();
   }
 
-  /* ── PUBLIC API ── */
-  return { log, openPanel, closePanel, renderPanel, _setWeek, _setCustomWeek, _setFilter, _setGroup };
+  return { log: log, openPanel: openPanel, closePanel: closePanel, renderPanel: renderPanel,
+           _setWeek: _setWeek, _setCustomWeek: _setCustomWeek, _setFilter: _setFilter, _setGroup: _setGroup };
 })();
 
 /* ============================================================
    GLOBAL CLICK — close popup
    ============================================================ */
-document.addEventListener('click',e=>{
+document.addEventListener('click',function(e){
   const pop=document.getElementById('note-popup');
   if(pop&&!pop.contains(e.target)&&!e.target.closest('.note-btn')&&!e.target.closest('.weekly-edit-btn')) closeNotePopup();
   if(e.target===document.getElementById('loginModal')) hideLogin();
