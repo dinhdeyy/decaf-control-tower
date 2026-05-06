@@ -512,16 +512,85 @@ function buildInitialData(){
 }
 
 /* ============================================================
+   CLOUD CONFIG — Firebase Realtime Database
+   ============================================================
+   HƯỚNG DẪN SETUP (làm 1 lần):
+   1. Vào https://console.firebase.google.com → "Add project"
+   2. Vào "Realtime Database" → "Create database" → chọn "Start in test mode"
+   3. Copy URL database (dạng: https://ten-project-default-rtdb.firebaseio.com)
+   4. Dán URL vào biến CLOUD_DB_URL bên dưới (thay "YOUR-PROJECT...")
+   ============================================================ */
+const CLOUD_DB_URL = 'https://YOUR-PROJECT-DEFAULT-RTDB.firebaseio.com/decaf_data';
+
+function _cloudEnabled(){ return CLOUD_DB_URL && !CLOUD_DB_URL.includes('YOUR-PROJECT'); }
+
+async function cloudPut(path, data){
+  if(!_cloudEnabled()) return;
+  try{ await fetch(CLOUD_DB_URL+'/'+path+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); }catch(e){}
+}
+
+async function cloudPatch(path, data){
+  if(!_cloudEnabled()) return;
+  try{ await fetch(CLOUD_DB_URL+'/'+path+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); }catch(e){}
+}
+
+async function cloudGet(path){
+  if(!_cloudEnabled()) return null;
+  try{
+    const r=await fetch(CLOUD_DB_URL+'/'+path+'.json');
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }
+}
+
+/* Sync dữ liệu từ cloud về — chạy sau khi trang load xong */
+async function syncFromCloud(){
+  if(!_cloudEnabled()) return;
+  const [statuses, notes, history] = await Promise.all([
+    cloudGet('statuses'), cloudGet('notes'), cloudGet('history')
+  ]);
+  let changed = false;
+  if(statuses){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(statuses)); }catch(e){}
+    tasks.forEach(t=>{ if(statuses[t.id]){ t.status=statuses[t.id]; changed=true; } });
+  }
+  if(notes){
+    try{ localStorage.setItem(LS_NOTES, JSON.stringify(notes)); }catch(e){}
+    tasks.forEach(t=>{ if(notes[t.id]!==undefined){ t.weeklyNote=notes[t.id]; changed=true; } });
+  }
+  if(history){
+    // history lưu dạng object {id: record} để tránh ghi đè khi nhiều người dùng
+    const arr=Object.values(history).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+    try{ localStorage.setItem('controlTowerHistory', JSON.stringify(arr)); }catch(e){}
+  }
+  if(changed){
+    renderOverview();
+    renderTaskBoard();
+    updateWeeklyBadge();
+    if(currentTab==='processprogress') renderProgressSection();
+    if(currentTab==='weekly') renderWeeklySection();
+  }
+}
+
+/* ============================================================
    STORAGE
    ============================================================ */
 const LS_KEY='pct_statuses_v3', LS_DARK='pct_dark', LS_LOGIN='pct_login', LS_NOTES='pct_notes_v1';
 const CREDENTIALS={u:'productionteam',p:'100%complete'};
 
 function loadStatuses(){ try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r):null;}catch{return null;} }
-function saveStatuses(){ const m={};tasks.forEach(t=>{m[t.id]=t.status;});try{localStorage.setItem(LS_KEY,JSON.stringify(m));}catch{} }
+function saveStatuses(){
+  const m={};tasks.forEach(t=>{m[t.id]=t.status;});
+  try{localStorage.setItem(LS_KEY,JSON.stringify(m));}catch{}
+  cloudPut('statuses', m); // đồng bộ lên cloud
+}
 function applyStoredStatuses(arr){ const s=loadStatuses();if(!s)return arr;arr.forEach(t=>{if(s[t.id])t.status=s[t.id];});return arr; }
 function loadNotes(){ try{const r=localStorage.getItem(LS_NOTES);return r?JSON.parse(r):{};}catch{return{};} }
-function saveNotes(){ const m={};tasks.forEach(t=>{if(t.weeklyNote)m[t.id]=t.weeklyNote;});try{localStorage.setItem(LS_NOTES,JSON.stringify(m));}catch{} }
+function saveNotes(){
+  const m={};tasks.forEach(t=>{if(t.weeklyNote)m[t.id]=t.weeklyNote;});
+  try{localStorage.setItem(LS_NOTES,JSON.stringify(m));}catch{}
+  cloudPut('notes', m); // đồng bộ lên cloud
+}
 function applyStoredNotes(arr){ const s=loadNotes();arr.forEach(t=>{if(s[t.id])t.weeklyNote=s[t.id];});return arr; }
 
 /* ============================================================
@@ -1019,6 +1088,7 @@ const historyManager = (function() {
     const existing = loadAll();
     existing.unshift(record);
     try { localStorage.setItem(LS_HISTORY, JSON.stringify(existing)); } catch(e) {}
+    cloudPatch('history', {[record.id]: record}); // đồng bộ lịch sử lên cloud
   }
 
   function loadAll() {
@@ -1415,6 +1485,7 @@ document.addEventListener('click',function(e){
   renderOverview();
   renderTaskBoard();
   updateWeeklyBadge();
+  syncFromCloud(); // tải dữ liệu mới nhất từ cloud sau khi render xong
 })();
 </script>
 </body>
