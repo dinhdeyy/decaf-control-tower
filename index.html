@@ -297,6 +297,8 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
 .login-submit{width:100%;height:46px;background:linear-gradient(135deg,var(--blue),var(--pink-dark));color:#fff;border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity 0.18s,transform 0.18s;box-shadow:0 4px 16px rgba(59,130,246,0.3);}
 .login-submit:hover{opacity:0.9;transform:translateY(-1px);}
 .login-hint{text-align:center;font-size:11px;color:var(--text-light);margin-top:16px;line-height:1.6;}
+/* Sync badge */
+.sync-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:99px;font-size:11px;border:1px solid var(--border);background:var(--surface2);cursor:default;white-space:nowrap;transition:all 0.2s;}
 </style>
 </head>
 <body>
@@ -341,6 +343,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:0
     <span class="toggle-label">🌙</span>
     <button class="dark-toggle" id="darkToggle" title="Toggle Dark Mode" onclick="toggleDark()"></button>
     <button class="btn btn-history" id="historyBtn" onclick="historyManager.openPanel()">🕐 History</button>
+    <div class="sync-badge" id="sync-badge" title="Cloud sync status">⚪ <span style="color:#94A3B8;font-weight:700;font-size:11px">Local only</span></div>
   </div>
 </header>
 
@@ -512,65 +515,195 @@ function buildInitialData(){
 }
 
 /* ============================================================
-   CLOUD CONFIG — Firebase Realtime Database
+   GITHUB DATA SYNC
    ============================================================
-   HƯỚNG DẪN SETUP (làm 1 lần):
-   1. Vào https://console.firebase.google.com → "Add project"
-   2. Vào "Realtime Database" → "Create database" → chọn "Start in test mode"
-   3. Copy URL database (dạng: https://ten-project-default-rtdb.firebaseio.com)
-   4. Dán URL vào biến CLOUD_DB_URL bên dưới (thay "YOUR-PROJECT...")
+   Tất cả dữ liệu lưu trong file decaf-data.json ngay trong repo GitHub.
+   Không cần service ngoài — chỉ cần điền 4 dòng config bên dưới.
+
+   HƯỚNG DẪN SETUP (làm 1 lần, ~3 phút):
+   Xem hướng dẫn chi tiết bên dưới trong code.
    ============================================================ */
-const CLOUD_DB_URL = 'https://YOUR-PROJECT-DEFAULT-RTDB.firebaseio.com/decaf_data';
 
-function _cloudEnabled(){ return CLOUD_DB_URL && !CLOUD_DB_URL.includes('YOUR-PROJECT'); }
+const GH_TOKEN  = 'ghp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'; // Personal Access Token
+const GH_OWNER  = 'ten-github-cua-ban';   // username hoặc org trên GitHub
+const GH_REPO   = 'ten-repo-cua-ban';     // tên repository
+const GH_BRANCH = 'main';                 // nhánh (thường là main hoặc master)
+const GH_FILE   = 'decaf-data.json';      // tên file lưu data (tự tạo, không cần tạo trước)
 
-async function cloudPut(path, data){
-  if(!_cloudEnabled()) return;
-  try{ await fetch(CLOUD_DB_URL+'/'+path+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); }catch(e){}
+/* ---- helpers ---- */
+function _ghOK(){
+  return GH_TOKEN && !GH_TOKEN.includes('XXXX') &&
+         GH_OWNER && !GH_OWNER.includes('ten-github') &&
+         GH_REPO  && !GH_REPO.includes('ten-repo');
 }
 
-async function cloudPatch(path, data){
-  if(!_cloudEnabled()) return;
-  try{ await fetch(CLOUD_DB_URL+'/'+path+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}); }catch(e){}
+function setSyncBadge(state){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  const map = {
+    saving:   {ico:'💾', txt:'Đang lưu...',   col:'#F59E0B'},
+    synced:   {ico:'🟢', txt:'Đã đồng bộ',    col:'#22C55E'},
+    loading:  {ico:'🔄', txt:'Đang tải...',   col:'#3B82F6'},
+    error:    {ico:'🔴', txt:'Lỗi lưu',       col:'#EF4444'},
+    disabled: {ico:'⚪', txt:'Local only',    col:'#94A3B8'}
+  };
+  const s = map[state] || map.disabled;
+  el.title = state==='disabled' ? 'Chưa cấu hình GitHub Token' : 'GitHub sync: '+s.txt;
+  el.innerHTML = s.ico+' <span style="color:'+s.col+';font-weight:700;font-size:11px">'+s.txt+'</span>';
 }
 
-async function cloudGet(path){
-  if(!_cloudEnabled()) return null;
+let _ghSha = null; // SHA của file hiện tại trên GitHub (bắt buộc để ghi đè)
+
+function _ghHeaders(){
+  return {
+    'Authorization': 'Bearer '+GH_TOKEN,
+    'Content-Type':  'application/json',
+    'Accept':        'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+}
+
+const _ghApiBase = () =>
+  `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+
+/* Đọc file từ GitHub, trả về parsed JSON hoặc null */
+async function ghRead(){
+  if(!_ghOK()) return null;
   try{
-    const r=await fetch(CLOUD_DB_URL+'/'+path+'.json');
+    const r = await fetch(_ghApiBase()+'?ref='+GH_BRANCH+'&t='+Date.now(), { headers: _ghHeaders() });
+    if(r.status === 404) return null; // file chưa tồn tại lần đầu
     if(!r.ok) return null;
-    return await r.json();
+    const meta = await r.json();
+    _ghSha = meta.sha;
+    const decoded = decodeURIComponent(escape(atob(meta.content.replace(/\n/g,''))));
+    return JSON.parse(decoded);
   }catch(e){ return null; }
 }
 
-/* Sync dữ liệu từ cloud về — chạy sau khi trang load xong */
-async function syncFromCloud(){
-  if(!_cloudEnabled()) return;
-  const [statuses, notes, history] = await Promise.all([
-    cloudGet('statuses'), cloudGet('notes'), cloudGet('history')
-  ]);
+/* Ghi toàn bộ data snapshot lên GitHub */
+async function ghWrite(data){
+  if(!_ghOK()) return false;
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const body = {
+      message: 'sync: update decaf data',
+      content,
+      branch: GH_BRANCH
+    };
+    if(_ghSha) body.sha = _ghSha;
+    const r = await fetch(_ghApiBase(), {
+      method: 'PUT', headers: _ghHeaders(), body: JSON.stringify(body)
+    });
+    if(!r.ok){
+      // SHA lỗi (file bị ghi bởi thiết bị khác) → đọc lại SHA rồi thử lại
+      if(r.status === 409 || r.status === 422){
+        const fresh = await ghRead();
+        if(fresh){ body.sha = _ghSha; }
+        const r2 = await fetch(_ghApiBase(), {
+          method:'PUT', headers: _ghHeaders(), body: JSON.stringify(body)
+        });
+        if(r2.ok){ const d2 = await r2.json(); _ghSha = d2.content.sha; return true; }
+      }
+      return false;
+    }
+    const res = await r.json();
+    _ghSha = res.content.sha;
+    return true;
+  }catch(e){ return false; }
+}
+
+/* Áp dụng snapshot từ cloud vào local state rồi re-render */
+function applyCloudSnapshot(data){
+  if(!data || typeof data !== 'object') return;
   let changed = false;
-  if(statuses){
-    try{ localStorage.setItem(LS_KEY, JSON.stringify(statuses)); }catch(e){}
-    tasks.forEach(t=>{ if(statuses[t.id]){ t.status=statuses[t.id]; changed=true; } });
+
+  if(data.statuses && typeof data.statuses === 'object'){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(data.statuses)); }catch(e){}
+    tasks.forEach(t=>{
+      if(data.statuses[t.id] && data.statuses[t.id] !== t.status){
+        t.status = data.statuses[t.id]; changed = true;
+      }
+    });
   }
-  if(notes){
-    try{ localStorage.setItem(LS_NOTES, JSON.stringify(notes)); }catch(e){}
-    tasks.forEach(t=>{ if(notes[t.id]!==undefined){ t.weeklyNote=notes[t.id]; changed=true; } });
+
+  if(data.notes && typeof data.notes === 'object'){
+    try{ localStorage.setItem(LS_NOTES, JSON.stringify(data.notes)); }catch(e){}
+    tasks.forEach(t=>{
+      if(Object.prototype.hasOwnProperty.call(data.notes, t.id)){
+        const nxt = data.notes[t.id] || null;
+        if(JSON.stringify(t.weeklyNote) !== JSON.stringify(nxt)){
+          t.weeklyNote = nxt; changed = true;
+        }
+      }
+    });
   }
-  if(history){
-    // history lưu dạng object {id: record} để tránh ghi đè khi nhiều người dùng
-    const arr=Object.values(history).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
+
+  if(data.history && typeof data.history === 'object'){
+    const arr = Object.values(data.history)
+      .filter(r => r && r.timestamp)
+      .sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
     try{ localStorage.setItem('controlTowerHistory', JSON.stringify(arr)); }catch(e){}
   }
+
   if(changed){
-    renderOverview();
-    renderTaskBoard();
-    updateWeeklyBadge();
+    renderOverview(); renderTaskBoard(); updateWeeklyBadge();
     if(currentTab==='processprogress') renderProgressSection();
     if(currentTab==='weekly') renderWeeklySection();
   }
 }
+
+/* Gom tất cả data hiện tại thành 1 object để lưu lên GitHub */
+function buildSnapshot(){
+  const statuses={}, notes={};
+  tasks.forEach(t=>{
+    statuses[t.id] = t.status;
+    if(t.weeklyNote) notes[t.id] = t.weeklyNote;
+  });
+  let history = {};
+  try{
+    const h = JSON.parse(localStorage.getItem('controlTowerHistory')||'[]');
+    h.forEach(r=>{ if(r&&r.id) history[r.id]=r; });
+  }catch(e){}
+  return { statuses, notes, history, _updated: new Date().toISOString() };
+}
+
+/* Debounce: tránh gọi GitHub API liên tục khi user thay đổi nhiều thứ nhanh */
+let _saveTimer = null;
+function scheduleSave(){
+  if(!_ghOK()) return;
+  setSyncBadge('saving');
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async ()=>{
+    const ok = await ghWrite(buildSnapshot());
+    setSyncBadge(ok ? 'synced' : 'error');
+  }, 1200); // chờ 1.2s sau lần thay đổi cuối cùng mới ghi
+}
+
+/* Polling: tự động tải data mới từ GitHub mỗi 45 giây */
+let _pollTimer = null;
+async function pollGitHub(){
+  if(!_ghOK()) return;
+  const data = await ghRead();
+  if(data) applyCloudSnapshot(data);
+}
+
+async function startRealtimeSync(){
+  if(!_ghOK()){ setSyncBadge('disabled'); return; }
+  setSyncBadge('loading');
+  const data = await ghRead();
+  if(data){
+    applyCloudSnapshot(data);
+    setSyncBadge('synced');
+  } else {
+    setSyncBadge('synced'); // file chưa có → OK, sẽ tạo khi có thay đổi đầu tiên
+  }
+  if(_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(pollGitHub, 45000); // poll mỗi 45s để bắt thay đổi từ thiết bị khác
+}
+
+/* Wrapper tương thích với các hàm cũ gọi cloudPut / cloudPatch */
+function cloudPut(path, data){ scheduleSave(); }
+function cloudPatch(path, data){ scheduleSave(); }
 
 /* ============================================================
    STORAGE
@@ -1485,7 +1618,7 @@ document.addEventListener('click',function(e){
   renderOverview();
   renderTaskBoard();
   updateWeeklyBadge();
-  syncFromCloud(); // tải dữ liệu mới nhất từ cloud sau khi render xong
+  startRealtimeSync(); // khởi động realtime sync với Firebase SSE
 })();
 </script>
 </body>
