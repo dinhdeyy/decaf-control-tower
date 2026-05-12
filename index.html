@@ -515,6 +515,119 @@ function buildInitialData(){
 }
 
 /* ============================================================
+   HARDCODED SNAPSHOT — trạng thái hiện tại tính đến 13/5/2026
+   Dữ liệu này được nhúng thẳng vào file để gửi cho teammate.
+   localStorage sẽ override tiếp sau khi có thay đổi mới.
+   ============================================================ */
+const HARDCODED_STATUSES = {
+  // EXT Production
+  "EXT_0_prod":"done","EXT_1_prod":"done","EXT_2_prod":"done","EXT_3_prod":"done",
+  "EXT_4_prod":"in-progress","EXT_5_prod":"done","EXT_6_prod":"done","EXT_7_prod":"done",
+  "EXT_8_prod":"done","EXT_9_prod":"done","EXT_10_prod":"done","EXT_11_prod":"done","EXT_12_prod":"done",
+  // EXT E&A
+  "EXT_0_ea":"done","EXT_1_ea":"done","EXT_2_ea":"done","EXT_3_ea":"done",
+  "EXT_4_ea":"in-progress","EXT_5_ea":"done","EXT_6_ea":"in-progress","EXT_7_ea":"in-progress",
+  "EXT_8_ea":"done","EXT_9_ea":"done","EXT_10_ea":"done","EXT_11_ea":"done",
+  // Rein Production
+  "Rein_0_prod":"done","Rein_1_prod":"done","Rein_2_prod":"done","Rein_3_prod":"done",
+  "Rein_4_prod":"in-progress","Rein_5_prod":"done","Rein_6_prod":"in-progress","Rein_7_prod":"in-progress",
+  "Rein_8_prod":"done","Rein_9_prod":"done","Rein_10_prod":"done","Rein_11_prod":"in-progress","Rein_12_prod":"in-progress",
+  // Rein E&A
+  "Rein_0_ea":"done","Rein_1_ea":"done","Rein_2_ea":"done","Rein_3_ea":"in-progress",
+  "Rein_4_ea":"in-progress","Rein_5_ea":"in-progress","Rein_6_ea":"in-progress","Rein_7_ea":"in-progress",
+  "Rein_8_ea":"in-progress","Rein_9_ea":"done","Rein_10_ea":"done","Rein_11_ea":"in-progress",
+  // GCH Production
+  "GCH_0_prod":"done","GCH_1_prod":"done","GCH_2_prod":"done","GCH_3_prod":"done",
+  "GCH_4_prod":"in-progress","GCH_5_prod":"done","GCH_6_prod":"in-progress","GCH_7_prod":"in-progress",
+  "GCH_8_prod":"done","GCH_9_prod":"done","GCH_10_prod":"done","GCH_11_prod":"in-progress","GCH_12_prod":"in-progress",
+  // GCH E&A
+  "GCH_0_ea":"done","GCH_1_ea":"done","GCH_2_ea":"done","GCH_3_ea":"in-progress",
+  "GCH_4_ea":"in-progress","GCH_5_ea":"done","GCH_6_ea":"in-progress","GCH_7_ea":"in-progress",
+  "GCH_8_ea":"in-progress","GCH_9_ea":"done","GCH_10_ea":"done","GCH_11_ea":"in-progress",
+  // IDR Production
+  "IDR_0_prod":"done","IDR_1_prod":"done","IDR_2_prod":"done","IDR_3_prod":"done",
+  "IDR_4_prod":"in-progress","IDR_5_prod":"done","IDR_6_prod":"in-progress","IDR_7_prod":"in-progress",
+  "IDR_8_prod":"done","IDR_9_prod":"in-progress","IDR_10_prod":"in-progress","IDR_11_prod":"in-progress","IDR_12_prod":"in-progress",
+  // IDR E&A
+  "IDR_0_ea":"done","IDR_1_ea":"done","IDR_2_ea":"done","IDR_3_ea":"done",
+  "IDR_4_ea":"in-progress","IDR_5_ea":"in-progress","IDR_6_ea":"in-progress","IDR_7_ea":"in-progress",
+  "IDR_8_ea":"in-progress","IDR_9_ea":"not-started","IDR_10_ea":"done","IDR_11_ea":"in-progress",
+  // FDR Production
+  "FDR_0_prod":"done","FDR_1_prod":"done","FDR_2_prod":"done","FDR_3_prod":"done",
+  "FDR_4_prod":"in-progress","FDR_5_prod":"done","FDR_6_prod":"in-progress","FDR_7_prod":"in-progress",
+  "FDR_8_prod":"done","FDR_9_prod":"done","FDR_10_prod":"in-progress","FDR_11_prod":"in-progress","FDR_12_prod":"in-progress",
+  // FDR E&A
+  "FDR_0_ea":"done","FDR_1_ea":"done","FDR_2_ea":"done","FDR_3_ea":"done",
+  "FDR_4_ea":"in-progress","FDR_5_ea":"in-progress","FDR_6_ea":"in-progress","FDR_7_ea":"in-progress",
+  "FDR_8_ea":"in-progress","FDR_9_ea":"done","FDR_10_ea":"done","FDR_11_ea":"in-progress",
+  // ADS Production
+  "ADS_0_prod":"done","ADS_1_prod":"done","ADS_2_prod":"done","ADS_3_prod":"done",
+  "ADS_4_prod":"in-progress","ADS_5_prod":"done","ADS_6_prod":"in-progress","ADS_7_prod":"in-progress",
+  "ADS_8_prod":"done","ADS_9_prod":"in-progress","ADS_10_prod":"in-progress","ADS_11_prod":"in-progress","ADS_12_prod":"in-progress",
+  // ADS E&A
+  "ADS_0_ea":"done","ADS_1_ea":"done","ADS_2_ea":"in-progress","ADS_3_ea":"in-progress",
+  "ADS_4_ea":"in-progress","ADS_5_ea":"in-progress","ADS_6_ea":"in-progress","ADS_7_ea":"in-progress",
+  "ADS_8_ea":"in-progress","ADS_9_ea":"in-progress","ADS_10_ea":"done","ADS_11_ea":"in-progress",
+  // EVAP1 Production
+  "EVAP1_0_prod":"done","EVAP1_1_prod":"done","EVAP1_2_prod":"done","EVAP1_3_prod":"done",
+  "EVAP1_4_prod":"in-progress","EVAP1_5_prod":"done","EVAP1_6_prod":"in-progress","EVAP1_7_prod":"in-progress",
+  "EVAP1_8_prod":"done","EVAP1_9_prod":"in-progress","EVAP1_10_prod":"in-progress","EVAP1_11_prod":"in-progress","EVAP1_12_prod":"in-progress",
+  // EVAP1 E&A
+  "EVAP1_0_ea":"done","EVAP1_1_ea":"done","EVAP1_2_ea":"done","EVAP1_3_ea":"done",
+  "EVAP1_4_ea":"in-progress","EVAP1_5_ea":"in-progress","EVAP1_6_ea":"in-progress","EVAP1_7_ea":"in-progress",
+  "EVAP1_8_ea":"in-progress","EVAP1_9_ea":"not-started","EVAP1_10_ea":"done","EVAP1_11_ea":"in-progress",
+  // EVAP2 Production
+  "EVAP2_0_prod":"done","EVAP2_1_prod":"done","EVAP2_2_prod":"done","EVAP2_3_prod":"done",
+  "EVAP2_4_prod":"in-progress","EVAP2_5_prod":"done","EVAP2_6_prod":"in-progress","EVAP2_7_prod":"in-progress",
+  "EVAP2_8_prod":"done","EVAP2_9_prod":"in-progress","EVAP2_10_prod":"in-progress","EVAP2_11_prod":"in-progress","EVAP2_12_prod":"in-progress",
+  // EVAP2 E&A
+  "EVAP2_0_ea":"in-progress","EVAP2_1_ea":"in-progress","EVAP2_2_ea":"in-progress","EVAP2_3_ea":"in-progress",
+  "EVAP2_4_ea":"in-progress","EVAP2_5_ea":"in-progress","EVAP2_6_ea":"in-progress","EVAP2_7_ea":"in-progress",
+  "EVAP2_8_ea":"in-progress","EVAP2_9_ea":"in-progress","EVAP2_10_ea":"done","EVAP2_11_ea":"in-progress",
+  // RO Production
+  "RO_0_prod":"done","RO_1_prod":"done","RO_2_prod":"done","RO_3_prod":"done",
+  "RO_4_prod":"in-progress","RO_5_prod":"done","RO_6_prod":"in-progress","RO_7_prod":"in-progress",
+  "RO_8_prod":"done","RO_9_prod":"in-progress","RO_10_prod":"in-progress","RO_11_prod":"in-progress","RO_12_prod":"in-progress",
+  // RO E&A
+  "RO_0_ea":"in-progress","RO_1_ea":"in-progress","RO_2_ea":"in-progress","RO_3_ea":"in-progress",
+  "RO_4_ea":"in-progress","RO_5_ea":"in-progress","RO_6_ea":"in-progress","RO_7_ea":"in-progress",
+  "RO_8_ea":"in-progress","RO_9_ea":"in-progress","RO_10_ea":"done","RO_11_ea":"in-progress",
+  // NSD Production
+  "NSD_0_prod":"done","NSD_1_prod":"done","NSD_2_prod":"done","NSD_3_prod":"done",
+  "NSD_4_prod":"in-progress","NSD_5_prod":"done","NSD_6_prod":"in-progress","NSD_7_prod":"in-progress",
+  "NSD_8_prod":"in-progress","NSD_9_prod":"in-progress","NSD_10_prod":"in-progress","NSD_11_prod":"in-progress","NSD_12_prod":"in-progress",
+  // NSD E&A
+  "NSD_0_ea":"done","NSD_1_ea":"done","NSD_2_ea":"done","NSD_3_ea":"done",
+  "NSD_4_ea":"in-progress","NSD_5_ea":"done","NSD_6_ea":"in-progress","NSD_7_ea":"in-progress",
+  "NSD_8_ea":"in-progress","NSD_9_ea":"in-progress","NSD_10_ea":"done","NSD_11_ea":"in-progress"
+};
+
+const HARDCODED_NOTES = {
+  // Week 20
+  "Rein_5_prod": {week:20, text:"test function"},
+  "Rein_5_ea":   {week:20, text:"create function QMS"},
+  "Rein_8_prod": {week:20, text:"test function"},
+  // Week 19
+  "EXT_6_prod":  {week:19, text:"Think cách gửi SQL, note details machine nào trên DMO"},
+  "EXT_7_prod":  {week:19, text:"Think cách gửi SQL, note details machine nào trên DMO"},
+  "EXT_7_ea":    {week:19, text:"Trial create planning function on EXT level 2 using SQL data"},
+  "EXT_11_ea":   {week:19, text:"sửa logic batchsize và temp"},
+  "EXT_12_prod": {week:19, text:"training WI"},
+  "Rein_6_ea":   {week:19, text:"Trial create planning function on EXT level 2 using SQL data"},
+  "Rein_8_ea":   {week:19, text:"create record function"},
+  "EVAP2_0_ea":  {week:19, text:"process control – deploy into level 2"},
+  "RO_0_ea":     {week:19, text:"process control – deploy into level 2"}
+};
+
+function applyHardcodedSnapshot(arr){
+  arr.forEach(t=>{
+    if(HARDCODED_STATUSES[t.id]) t.status = HARDCODED_STATUSES[t.id];
+    if(HARDCODED_NOTES[t.id])   t.weeklyNote = HARDCODED_NOTES[t.id];
+  });
+  return arr;
+}
+
+/* ============================================================
    GITHUB DATA SYNC
    ============================================================
    Tất cả dữ liệu lưu trong file decaf-data.json ngay trong repo GitHub.
@@ -729,7 +842,7 @@ function applyStoredNotes(arr){ const s=loadNotes();arr.forEach(t=>{if(s[t.id])t
 /* ============================================================
    APP STATE
    ============================================================ */
-let tasks = applyStoredNotes(applyStoredStatuses(buildInitialData()));
+let tasks = applyStoredNotes(applyStoredStatuses(applyHardcodedSnapshot(buildInitialData())));
 let currentTab='overview', isDark=false, isLoggedIn=localStorage.getItem(LS_LOGIN)==='1';
 let selectedWeek=getCurrentWeek(), activeNoteId=null;
 const STATUS_CYCLE={'not-started':'in-progress','in-progress':'done','done':'not-started'};
